@@ -2,8 +2,10 @@ import numpy as np
 
 from src.utils import deco_print
 
+# defines the category of each variable, this is for the covenience of later plotings
 class FirmChar:
 	def __init__(self):
+		# define each category includes which variables
 		self._category = ['Past Returns', 'Investment', 'Profitability', 'Intangibles', 'Value', 'Trading Frictions']
 		self._category2variables = {
 			'Past Returns': ['r2_1', 'r12_2', 'r12_7', 'r36_13', 'ST_REV', 'LT_Rev'],
@@ -13,10 +15,14 @@ class FirmChar:
 			'Value': ['A2ME', 'BEME', 'C', 'CF', 'CF2P', 'D2P', 'E2P', 'Q', 'S2P', 'Lev'],
 			'Trading Frictions': ['AT', 'Beta', 'IdioVol', 'LME', 'LTurnover', 'MktBeta', 'Rel2High', 'Resid_Var', 'Spread', 'SUV', 'Variance']
 		}
+
+		# define each variable belongs to which category
 		self._variable2category = {}
 		for category in self._category:
 			for var in self._category2variables[category]:
 				self._variable2category[var] = category
+		
+		# define the color of each category
 		self._category2color = {
 			'Past Returns': 'red', 
 			'Investment': 'green', 
@@ -25,11 +31,14 @@ class FirmChar:
 			'Value': 'purple', 
 			'Trading Frictions': 'orange'
 		}
+
+		# define each color represents which category, simply reverse the key and value of _category2color
 		self._color2category = {value:key for key, value in self._category2color.items()}
 
 	def getColorLabelMap(self):
 		return {var: self._category2color[self._variable2category[var]] for var in self._variable2category}
 
+# this class is important, which defines all input data, including individual features and macro features
 class DataInRamInputLayer:
 	def __init__(self, 
 				pathIndividualFeature, 
@@ -38,7 +47,8 @@ class DataInRamInputLayer:
 				meanMacroFeature=None, 
 				stdMacroFeature=None, 
 				normalizeMacroFeature=True):
-		self._UNK = -99.99
+		self._UNK = -99.99 # a value to find whether returns are missing, 
+		 					# if the return is -99.99, then it is missing, the missing information is stored in mask
 		self._load_individual_feature(pathIndividualFeature)
 		self._load_macro_feature(pathMacroFeature, macroIdx, meanMacroFeature, stdMacroFeature, normalizeMacroFeature)
 		self._firm_char = FirmChar()
@@ -48,6 +58,7 @@ class DataInRamInputLayer:
 		var2idx = {var:idx for idx, var in enumerate(varList)}
 		return idx2var, var2idx
 
+	# load npz file, 
 	def _load_individual_feature(self, pathIndividualFeature):
 		tmp = np.load(pathIndividualFeature)
 		data = tmp['data']
@@ -63,7 +74,19 @@ class DataInRamInputLayer:
 		self._dateCount, self._permnoCount, self._varCount = data.shape
 		self._varCount -= 1
 
+	#  load macro features from npz file, check config['macro_feature_file'] to find the path
+	# the function also generate the mean and std of the macro features
+	
 	def _load_macro_feature(self, pathMacroFeature, macroIdx=None, meanMacroFeature=None, stdMacroFeature=None, normalizeMacroFeature=True):
+		'''
+		pathMacroFeature: path to the macro feature file
+		macroIdx: list of indices of macro features to be used, if None, use all macro features
+		meanMacroFeature: mean of macro features, if None, calculate the mean
+		stdMacroFeature: std of macro features, if None, calculate the std
+		normalizeMacroFeature: whether to normalize the macro features
+		'''
+		
+		
 		if pathMacroFeature is None:
 			self._macroFeature = np.empty(shape=[self._dateCount, 0])
 			self._meanMacroFeature = None
@@ -134,6 +157,9 @@ class DataInRamInputLayer:
 	def getIndividualFeatureColarLabelMap(self):
 		return self._firm_char.getColorLabelMap(), self._firm_char._color2category
 
+
+	# iterate through the data, if subEpoch is not None, then iterate the same value for subEpoch times
+	# if subEpoch is None, then iterate the whole data for just one time
 	def iterateOneEpoch(self, subEpoch=False):
 		if subEpoch:
 			for _ in range(subEpoch):

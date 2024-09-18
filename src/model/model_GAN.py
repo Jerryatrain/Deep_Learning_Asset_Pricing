@@ -341,6 +341,7 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 			self._update_moment_op = self._build_train_op(-self._loss, scope='Moment_Layer')
 			self._train_model_op = self._build_train_op(self._loss + self._residual_loss_factor * self._loss_residual, scope='Model_Layer')
 
+	# this includes the procedure to find states of macro features
 	def _build_forward_pass_graph_moment(self):
 		if self.model_params['use_rnn']:
 			with tf.variable_scope('RNN_Layer'):
@@ -791,6 +792,8 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 			feed_dict = {self._I_macro_placeholder:I_macro,
 						self._initial_state_placeholder:initial_state,
 						self._dropout_placeholder:1.0}
+			# the sess.run is to get the next state, but the method is inside tensorflow, which is unknow
+			# we only know this would generate initial state based on previous model
 			INITIAL_next, = sess.run(fetches=[self._rnn_last_state], feed_dict=feed_dict)
 		return INITIAL_next
 
@@ -1138,6 +1141,7 @@ class NNModel(ModelBase):
 		with tf.variable_scope(name_or_scope='Model_Layer', reuse=self._force_var_reuse):
 			self._build_forward_pass_graph()
 
+	# this is for finding the states of the macro variables
 	def _build_forward_pass_graph(self):
 		with tf.variable_scope('NN_Layer'):
 			I_macro_tile = tf.tile(tf.expand_dims(self._I_macro_placeholder, axis=1), [1,self._nSize,1]) # T * N * macro_feature_dim
