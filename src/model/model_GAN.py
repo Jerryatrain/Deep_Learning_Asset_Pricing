@@ -299,10 +299,13 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 		self._macro_feature_dim = self.model_params['macro_feature_dim']
 		self._individual_feature_dim = self.model_params['individual_feature_dim']
 
+		# placeholder, this variable will be feed with data
 		self._I_macro_placeholder = tf.placeholder(dtype=tf.float32, shape=[self._tSize, self._macro_feature_dim], name='macroFeaturePlaceholder')
 		self._I_placeholder = tf.placeholder(dtype=tf.float32, shape=[self._tSize, None, self._individual_feature_dim], name='individualFeaturePlaceholder')
 		self._R_placeholder = tf.placeholder(dtype=tf.float32, shape=[self._tSize, None], name='returnPlaceholder')
 		self._mask_placeholder = tf.placeholder(dtype=tf.bool, shape=[self._tSize, None], name='maskPlaceholder')
+		
+		# dropout is a function to prevent overfitting
 		self._dropout_placeholder = tf.placeholder_with_default(1.0, shape=[], name='Dropout')
 
 		self._nSize = tf.shape(self._R_placeholder)[1]
@@ -341,8 +344,10 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 			self._update_moment_op = self._build_train_op(-self._loss, scope='Moment_Layer')
 			self._train_model_op = self._build_train_op(self._loss + self._residual_loss_factor * self._loss_residual, scope='Model_Layer')
 
-	# this includes the procedure to find states of macro features
+	# this is the conditional network, which is used to maximize loss, refer to fig 1
 	def _build_forward_pass_graph_moment(self):
+
+		# define the model use RNN
 		if self.model_params['use_rnn']:
 			with tf.variable_scope('RNN_Layer'):
 				rnn_cell = create_rnn_cell(
@@ -361,12 +366,15 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 		else:
 			self._macro_nn_input_moment = self._I_macro_placeholder
 
+		# input macro features
 		with tf.variable_scope('NN_Layer'):
 			I_macro_tile = tf.tile(tf.expand_dims(self._macro_nn_input_moment, axis=1), [1,self._nSize,1]) # T * N * macro_feature_dim
 			I_concat = tf.concat([I_macro_tile, self._I_placeholder], axis=2) # T * N * (macro_feature_dim + individual_feature_dim)
 
+			# the folowwing process input macro features and usee dense layer to generate h^g in fig 1
 			h_l = I_concat
 			for l in range(self.model_params['num_layers_moment']):
+				# dense layer function is reduce feature dimension
 				with tf.variable_scope('dense_layer_%d' %l):
 					layer_l = Dense(units=self.model_params['hidden_dim_moment'][l], activation=tf.nn.relu)
 					h_l = layer_l(h_l)
@@ -376,6 +384,7 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 				layer = Dense(units=self.model_params['num_condition_moment'], activation=tf.nn.tanh)
 				self._h = tf.transpose(layer(h_l), perm=[2,0,1]) # num_condition_moment * T * N
 
+	# this is for non conditional FFN, which is the SDF network in fig 1
 	def _build_forward_pass_graph(self):
 		if self.model_params['use_rnn']:
 			with tf.variable_scope('RNN_Layer'):
@@ -393,6 +402,8 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 					dtype=tf.float32)
 				self._macro_nn_input = tf.squeeze(rnn_outputs, axis=0)
 
+				
+				# this is the first part of SDF network, which is using lstm to generate macro states
 				if self.model_params['cell_type_rnn'] == 'lstm':
 					if self.model_params['num_layers_rnn'] == 1:
 						self._rnn_last_state = tf.concat([rnn_state.c, rnn_state.h], axis=1)
@@ -425,6 +436,9 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 				w = layer(h_l)
 				self._w = tf.reshape(w, shape=[-1])
 
+
+		### this is the second part of the SDF network, which is calculating the SDF with macro states generated in last step
+		### note that _build_forward_pass_graph_moment is the conditional network, which is used to maximize loss, it does not need to generate SDf, but only h^g in fig 1
 			weighted_R_masked = R_masked * self._w
 
 		N_i = tf.reduce_sum(tf.to_int32(self._mask_placeholder), axis=1) # len T
@@ -436,6 +450,7 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 		else:
 			self._SDF = tf.expand_dims(tf.concat([tf.reduce_sum(item, keepdims=True) for item in weighted_R_split], axis=0), axis=1) + 1
 
+	### this is the loss function for the which is equation (4), used to minimized SDF network
 	def _add_loss(self, h):
 		T_i = tf.reduce_sum(tf.to_float(self._mask_placeholder), axis=0) # len N
 		empirical_mean = tf.reduce_sum(self._R_placeholder * tf.to_float(self._mask_placeholder) * self._SDF * h, axis=1) / T_i
@@ -445,7 +460,7 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 		else:
 			return tf.reduce_mean(tf.square(empirical_mean))
 
-	### add residual loss
+	### this is the loss function for the residual which is used to minize the GAN model
 	def _add_loss_residual(self):
 		N_i = tf.reduce_sum(tf.to_int32(self._mask_placeholder), axis=1) # len T
 		R_masked = tf.boolean_mask(self._R_placeholder, mask=self._mask_placeholder)
@@ -495,10 +510,11 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 			else:
 				INITIAL_train = None
 
-			### train unconditional loss
+			### train unconditional nework, which SDF network
 			time_start = time.time()
 			deco_print('Start Training Unconditional Loss...')
 			for epoch in range(self.model_params['num_epochs_unc']):
+				# run inner loop to get better output of SDF and conditional network
 				for _, (I_macro, I, R, mask) in enumerate(dl.iterateOneEpoch(subEpoch=self.model_params['sub_epoch'])):
 					feed_dict = {self._I_macro_placeholder:I_macro, 
 								self._I_placeholder:I, 
@@ -559,7 +575,7 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 					sw.add_summary(summary, global_step=epoch)
 					sw.flush()
 
-				### save epoch
+				### save best model based on loss and sharpe
 				if epoch > ignoreEpoch:
 					if valid_epoch_loss < best_valid_loss_unc:
 						best_valid_loss_unc = valid_epoch_loss
@@ -571,7 +587,8 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 						if printOnConsole and epoch % printFreq == 0:
 							deco_print('Saving current best checkpoint (sharpe)')
 						saver.save(sess, save_path=os.path.join(logdir_sharpe, 'model-best'))
-
+				
+				# save checkpoints
 				if saveBestFreq > 0 and (epoch+1) % saveBestFreq == 0:
 					path_epoch_loss = os.path.join(logdir_loss,'UNC',str(epoch))
 					path_best_loss = os.path.join(logdir_loss, 'model-best*')
@@ -595,7 +612,7 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 
 			deco_print('Training Unconditional Loss Finished!\n')
 
-			### update moment condition
+			### update conditional network
 			deco_print('Start Updating Moment Conditions...')
 			self.loadSavedModel(sess, logdir_loss)
 			for _, (I_macro, I, R, mask) in enumerate(dl.iterateOneEpoch(subEpoch=self.model_params['sub_epoch'])):
@@ -610,6 +627,7 @@ class FeedForwardModelWithNA_GAN(ModelBase):
 				if self.model_params['use_rnn']:
 					feed_dict[self._initial_state_placeholder] = INITIAL_train
 
+				# this part is to maximize the loss, which is the conditional network in fig 1
 				for epoch in range(self.model_params['num_epochs_moment']):
 					_, loss = sess.run(fetches=[self._update_moment_op, self._loss], feed_dict=feed_dict)
 					if loss > best_moment_loss:

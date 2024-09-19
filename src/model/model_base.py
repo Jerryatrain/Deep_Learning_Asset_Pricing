@@ -27,13 +27,13 @@ class ModelBase:
 		return
 
 	def _build_train_op(self, loss, scope, loss_factor=1.0):
-		"""Construct a training op. 
+		"""Construct a training operation. 
 
 		Arguments:
 			loss: Scalar 'Tensor'
 		"""
 
-		### Trainable variables
+		### Trainable variables collection
 		deco_print('Trainable variables (scope=%s)' %scope)
 		total_params = 0
 		trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
@@ -45,7 +45,7 @@ class ModelBase:
 			print('Name: {} and shape: {}'.format(var.name, var.get_shape()))
 		deco_print('Number of parameters: %d' %total_params)
 
-		### Train optimizer
+		### Train optimizer definition, including learning rate decay, gradient clipping, etc.
 		if self._model_params['optimizer'] == 'Momentum':
 			optimizer = lambda lr: tf.train.MomentumOptimizer(lr, momentum=0.9)
 		elif self._model_params['optimizer'] == 'AdaDelta':
@@ -53,7 +53,7 @@ class ModelBase:
 		else:
 			optimizer = self._model_params['optimizer']
 
-		### Learning rate decay
+		### Defines the learning rate decay function, according to global step
 		if 'use_decay' in self._model_params and self._model_params['use_decay'] == True:
 			learning_rate_decay_fn = lambda lr, global_step: tf.train.exponential_decay(
 				learning_rate=lr,
@@ -64,6 +64,7 @@ class ModelBase:
 		else:
 			learning_rate_decay_fn = None
 
+		### Optimize the loss
 		return tf.contrib.layers.optimize_loss(
 			loss=loss * loss_factor,
 			global_step=self._global_step,
@@ -91,7 +92,9 @@ class ModelBase:
 	def randomInitialization(self, sess):
 		sess.run(tf.global_variables_initializer())
 		deco_print('Random initialization')
-
+	
+	# load checkpoints, which includes the model parameters and the trained weights
+	# the checkpoints is loaded to the session sess, which is a unique function in tensorflow
 	def loadSavedModel(self, sess, logdir):
 		if tf.train.latest_checkpoint(logdir) is not None:
 			saver = tf.train.Saver(max_to_keep=100)
