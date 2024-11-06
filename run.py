@@ -7,9 +7,9 @@ from src.data import data_layer
 from src.model.model_GAN import FeedForwardModelWithNA_GAN
 from src.utils import deco_print
 
-tf.flags.DEFINE_string('config', '', 'Path to the file with configurations')
-tf.flags.DEFINE_string('logdir', '', 'Path to save logs and checkpoints')
-tf.flags.DEFINE_string('task_id', '', 'ID of task')
+tf.flags.DEFINE_string('config', 'config/config.json', 'Path to the file with configurations')
+tf.flags.DEFINE_string('logdir', 'test_log', 'Path to save logs and checkpoints')
+tf.flags.DEFINE_string('task_id', '30', 'ID of task')
 
 tf.flags.DEFINE_integer('saveBestFreq', -1, 'Frequency to save best model')
 tf.flags.DEFINE_boolean('printOnConsole', True, 'Print on console or not')
@@ -65,8 +65,9 @@ def main(_):
 	sess = tf.Session(config=sess_config)
 	model.randomInitialization(sess)
 	
-	logdir_trial = os.path.join(FLAGS.logdir, 'Task_%s_Trial_%d'%(FLAGS.task_id, FLAGS.trial_id))
-	os.system('mkdir -p ' + logdir_trial)
+	logdir_trial = os.path.normpath(os.path.join(FLAGS.logdir, 'Task_%s_Trial_%d'%(FLAGS.task_id, FLAGS.trial_id)))
+	#os.system('mkdir -p ' + logdir_trial)
+	os.makedirs(logdir_trial, exist_ok=True)
 	sharpe_train, sharpe_valid, sharpe_test = model.train(sess, dl, dl_valid, logdir_trial, model_valid, 
 		loss_weight=loss_weight, loss_weight_valid=loss_weight_valid,
 		dl_test=dl_test, model_test=model_test, loss_weight_test=loss_weight_test, 
